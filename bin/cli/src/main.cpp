@@ -28,6 +28,8 @@ using private_key_type = scheme_type::private_key_type;
 using public_key_type = scheme_type::public_key_type;
 using accumulator_type = scheme_type::accumulator_type;
 
+namespace po = boost::program_options;
+
 struct marshalling_policy {
     using endianness = nil::marshalling::option::little_endian;
     using field_base_type = nil::marshalling::field_type<endianness>;
@@ -136,46 +138,143 @@ int main(int argc, char *argv[]) {
     std::string description =
         "Powers of Tau, A Trusted Setup Multi Party Computation Protcol\n"
         "Usage:\n"
-        "init - Initialize the a trusted setup MPC ceremony\n"
+        "init - Initialize a trusted setup MPC ceremony\n"
         "contribute - Contribute randomness to the trusted setup\n"
         "verify - Verify a contribution to the trusted setup\n"
         "\n"
         "Run `cli subcommand --help` for details about a specific subcommand";
     
+    int usage_error_exit_code = 1;
+    int help_message_exit_code = 2;
+    int invalid_exit_code = 3;
+    
     if(argc < 2) {
         std::cout << description << std::endl;
-        return 0;
+        return help_message_exit_code;
     }
 
     std::string command = argv[1];
     if(command == "init") {
-        std::string output_path = "challenge";
-        std::cout << "Initializing Powers Of Tau challenge" << std::endl;
+        po::options_description desc("init - Initialize a trusted setup MPC ceremony");
+        desc.add_options()("help,h", "Display help message")
+        ("output,o", po::value<std::string>(), "Initial challenge output path");
+
+        po::variables_map vm;
+        po::store(po::parse_command_line(argc-1, argv+1, desc), vm);
+        po::notify(vm);
+
+        if(argc < 3 || vm.count("help")) {
+            std::cout << desc << std::endl;
+            return help_message_exit_code;
+        }
+
+        if(!vm.count("output")) {
+            std::cout << "missing argument -o [ --output ]" << std::endl;
+            std::cout << desc << std::endl;
+            return usage_error_exit_code;
+        }
+        
+        std::string output_path = vm["output"].as<std::string>();
+        std::cout << "Initializing Powers Of Tau challenge..." << std::endl;
         auto acc = init_ceremony();
+
+        std::cout << "Writing to file..." << std::endl;
+
         std::vector<std::uint8_t> acc_blob = marshalling_policy::serialize_accumulator(acc);
         marshalling_policy::write_obj(output_path, {acc_blob});
         std::cout << "Challenge written to " << output_path << std::endl;
     } else if(command == "contribute") {
-        std::string challenge_path = "challenge";
-        std::string response_path = "response";
+        po::options_description desc("contribute - Contribute randomness to the trusted setup");
+        desc.add_options()("help,h", "Display help message")
+        ("challenge,c", po::value<std::string>(), "challenge input path")
+        ("output,o", po::value<std::string>(), "Response output path");
+
+        po::variables_map vm;
+        po::store(po::parse_command_line(argc-1, argv+1, desc), vm);
+        po::notify(vm);
+
+        if(argc < 3 || vm.count("help")) {
+            std::cout << desc << std::endl;
+            return help_message_exit_code;
+        }
+
+        if(!vm.count("challenge")) {
+            std::cout << "missing argument -c [ --challenge ]" << std::endl;
+            std::cout << desc << std::endl;
+            return usage_error_exit_code;
+        }
+
+        if(!vm.count("output")) {
+            std::cout << "missing argument -o [ --output ]" << std::endl;
+            std::cout << desc << std::endl;
+            return usage_error_exit_code;
+        }
+        
+        std::string challenge_path = vm["challenge"].as<std::string>();
+        std::string output_path = vm["output"].as<std::string>();
+        
+        std::cout << "Reading challenge file: " << challenge_path << std::endl;
+        
         std::vector<std::uint8_t> challenge_blob = marshalling_policy::read_obj(challenge_path);
         accumulator_type acc = marshalling_policy::deserialize_accumulator(challenge_blob);
+
+        std::cout << "Contributing randomness..." << std::endl;
+
         public_key_type public_key = contribute_randomness(acc);
-        std::vector<std::uint8_t> response_blob =  marshalling_policy::serialize_accumulator(acc);
+        
+        std::cout << "Writing to file..." << std::endl;
+        
+        std::vector<std::uint8_t> response_acc_blob =  marshalling_policy::serialize_accumulator(acc);
         std::vector<std::uint8_t> public_key_blob = marshalling_policy::serialize_public_key(public_key);
-        marshalling_policy::write_obj(response_path, {response_blob, public_key_blob});
+        marshalling_policy::write_obj(output_path, {response_acc_blob, public_key_blob});
+
+        std::cout << "Reponse written to " << output_path << std::endl;
     } else if(command=="verify") {
-        std::string before_path = "before";
-        std::string after_path = "after";
-        std::vector<std::uint8_t> before_blob = marshalling_policy::read_obj(before_path);
-        std::vector<std::uint8_t> after_blob = marshalling_policy::read_obj(after_path);
-        accumulator_type before = marshalling_policy::deserialize_accumulator(before_blob);
-        auto [after, pk] = marshalling_policy::deserialize_response(after_blob);
+        po::options_description desc("verify - Contribute randomness to the trusted setup");
+        desc.add_options()("help,h", "Display help message")
+        ("challenge,c", po::value<std::string>(), "Path to challenge file")
+        ("response,r", po::value<std::string>(), "Path to response file");
+
+        po::variables_map vm;
+        po::store(po::parse_command_line(argc-1, argv+1, desc), vm);
+        po::notify(vm);
+
+        if(argc < 3 || vm.count("help")) {
+            std::cout << desc << std::endl;
+            return help_message_exit_code;
+        }
+
+        if(!vm.count("challenge")) {
+            std::cout << "missing argument -c [ --challenge ]" << std::endl;
+            std::cout << desc << std::endl;
+            return usage_error_exit_code;
+        }
+
+        if(!vm.count("response")) {
+            std::cout << "missing argument -r [ --response ]" << std::endl;
+            std::cout << desc << std::endl;
+            return usage_error_exit_code;
+        }
+
+        std::string challenge_path = vm["challenge"].as<std::string>();
+        std::string response_path = vm["response"].as<std::string>();
+
+        std::cout << "Reading files challenge: " << challenge_path << " response: " << response_path << std::endl;
+
+        std::vector<std::uint8_t> challenge_blob = marshalling_policy::read_obj(challenge_path);
+        std::vector<std::uint8_t> reponse_blob = marshalling_policy::read_obj(response_path);
+        accumulator_type before = marshalling_policy::deserialize_accumulator(challenge_blob);
+        auto [after, pk] = marshalling_policy::deserialize_response(reponse_blob);
+        
+        std::cout << "Verifying contribution..." << std::endl;
+        
         bool is_valid = verify_contribution(before, after, pk);
-        std::cout << (is_valid ? "Contribution is valid!" : "Contribution is invalid!");
+        std::cout << (is_valid ? "Contribution is valid!" : "Contribution is invalid!") << std::endl;
     } else {
         std::cout << "invalid command: " << command << std::endl;
         std::cout << description << std::endl;
+        return usage_error_exit_code;
     }
+
     return 0;
 }
