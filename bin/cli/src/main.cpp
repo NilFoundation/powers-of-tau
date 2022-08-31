@@ -142,7 +142,6 @@ bool verify_contribution(const accumulator_type &before,
 }
 
 result_type create_radix(const accumulator_type &acc, std::size_t m) {
-    BOOST_ASSERT(m <= tau_powers);
     return result_type::from_accumulator(acc, m);
 }
 
@@ -330,9 +329,9 @@ int main(int argc, char *argv[]) {
         std::string input_path = vm["input"].as<std::string>();
         std::string output_path = vm["output"].as<std::string>();
         std::size_t m = vm["radix-m"].as<std::size_t>();
-
-        if(m > tau_powers) {
-            std::cout << "m cannot be bigger than " << tau_powers << std::endl;
+        std::size_t real_m = math::make_evaluation_domain<curve_type::scalar_field_type>(m) -> m;
+        if(real_m > tau_powers) {
+            std::cout << "m is too big for this ceremony configuration" << std::endl;
             return usage_error_exit_code;
         }
 
