@@ -17,7 +17,7 @@
 
 #include <nil/crypto3/marshalling/zk/types/commitments/powers_of_tau/accumulator.hpp>
 #include <nil/crypto3/marshalling/zk/types/commitments/powers_of_tau/public_key.hpp>
-#include <nil/crypto3/marshalling/zk/types/commitments/proof_of_knowledge.hpp>
+#include <nil/crypto3/marshalling/zk/types/commitments/powers_of_tau/result.hpp>
 
 using namespace nil::crypto3;
 
@@ -27,6 +27,7 @@ using scheme_type = zk::commitments::powers_of_tau<curve_type, tau_powers>;
 using private_key_type = scheme_type::private_key_type;
 using public_key_type = scheme_type::public_key_type;
 using accumulator_type = scheme_type::accumulator_type;
+using result_type = scheme_type::result_type;
 
 namespace po = boost::program_options;
 
@@ -35,7 +36,7 @@ struct marshalling_policy {
     using field_base_type = nil::marshalling::field_type<endianness>;
     using accumulator_marshalling_type = nil::crypto3::marshalling::types::powers_of_tau_accumulator<field_base_type, accumulator_type>;
     using public_key_marshalling_type = nil::crypto3::marshalling::types::powers_of_tau_public_key<field_base_type, public_key_type>;
-    using pok_marshalling_type = nil::crypto3::marshalling::types::element_pok<field_base_type, zk::commitments::detail::element_pok<curve_type>>;
+    using result_marshalling_type = nil::crypto3::marshalling::types::powers_of_tau_result<field_base_type, result_type>;
 
     template<typename MarshalingType, typename InputObj, typename F>
     static std::vector<std::uint8_t> serialize_obj(const InputObj &in_obj, const std::function<F> &f) {
@@ -86,11 +87,16 @@ struct marshalling_policy {
         return {acc, pk};
     }
 
+    static std::vector<std::uint8_t> serialize_result(const result_type& res) {
+        return serialize_obj<result_marshalling_type>(res,
+            std::function(nil::crypto3::marshalling::types::fill_powers_of_tau_result<result_type, endianness>));
+    }
+
     template<typename Path, typename Blob>
-    static void write_obj(const Path &path, std::initializer_list<Blob> blobs) {
+    static bool write_obj(const Path &path, std::initializer_list<Blob> blobs) {
         if (std::filesystem::exists(path)) {
             std::cout << "File " << path << " exists and won't be overwritten." << std::endl;
-            return;
+            return false;
         }
         std::ofstream out(path, std::ios_base::binary);
         for (const auto &blob : blobs) {
@@ -99,6 +105,7 @@ struct marshalling_policy {
             }
         }
         out.close();
+        return true;
     }
 
     template<typename Path>
@@ -134,6 +141,11 @@ bool verify_contribution(const accumulator_type &before,
     return scheme_type::verify_eval(public_key, before, after);
 }
 
+result_type create_radix(const accumulator_type &acc, std::size_t m) {
+    BOOST_ASSERT(m <= tau_powers);
+    return result_type::from_accumulator(acc, m);
+}
+
 int main(int argc, char *argv[]) {
     std::string description =
         "Powers of Tau, A Trusted Setup Multi Party Computation Protcol\n"
@@ -141,12 +153,14 @@ int main(int argc, char *argv[]) {
         "init - Initialize a trusted setup MPC ceremony\n"
         "contribute - Contribute randomness to the trusted setup\n"
         "verify - Verify a contribution to the trusted setup\n"
-        "\n"
+        "create-radix - Create a radix evalutation domain from\n"
+        " the last response in the ceremony.\n"
         "Run `cli subcommand --help` for details about a specific subcommand";
     
     int usage_error_exit_code = 1;
     int help_message_exit_code = 2;
     int invalid_exit_code = 3;
+    int file_exists_exit_code = 4;
     
     if(argc < 2) {
         std::cout << description << std::endl;
@@ -181,7 +195,9 @@ int main(int argc, char *argv[]) {
         std::cout << "Writing to file..." << std::endl;
 
         std::vector<std::uint8_t> acc_blob = marshalling_policy::serialize_accumulator(acc);
-        marshalling_policy::write_obj(output_path, {acc_blob});
+        if(!marshalling_policy::write_obj(output_path, {acc_blob})) {
+            return file_exists_exit_code;
+        }
         std::cout << "Challenge written to " << output_path << std::endl;
     } else if(command == "contribute") {
         po::options_description desc("contribute - Contribute randomness to the trusted setup");
@@ -226,7 +242,9 @@ int main(int argc, char *argv[]) {
         
         std::vector<std::uint8_t> response_acc_blob =  marshalling_policy::serialize_accumulator(acc);
         std::vector<std::uint8_t> public_key_blob = marshalling_policy::serialize_public_key(public_key);
-        marshalling_policy::write_obj(output_path, {response_acc_blob, public_key_blob});
+        if(!marshalling_policy::write_obj(output_path, {response_acc_blob, public_key_blob})) {
+            return file_exists_exit_code;
+        }
 
         std::cout << "Reponse written to " << output_path << std::endl;
     } else if(command=="verify") {
@@ -273,6 +291,68 @@ int main(int argc, char *argv[]) {
         if(!is_valid) {
             return 1;
         }
+
+    } else if(command == "create-radix") {
+        po::options_description desc("create-radix - Create a radix evalutation domain from\n"
+        " the last response in the ceremony.\n");
+        desc.add_options()("help,h", "Display help message")
+        ("input,i", po::value<std::string>(), "Response input path")
+        ("output,o", po::value<std::string>(), "Radix output path")
+        ("radix-m,m", po::value<std::size_t>(), "Radix evalutation domain size");
+
+        po::variables_map vm;
+        po::store(po::parse_command_line(argc-1, argv+1, desc), vm);
+        po::notify(vm);
+
+        if(argc < 3 || vm.count("help")) {
+            std::cout << desc << std::endl;
+            return help_message_exit_code;
+        }
+
+        if(!vm.count("input")) {
+            std::cout << "missing argument -i [ --input ]" << std::endl;
+            std::cout << desc << std::endl;
+            return usage_error_exit_code;
+        }
+
+        if(!vm.count("output")) {
+            std::cout << "missing argument -o [ --output ]" << std::endl;
+            std::cout << desc << std::endl;
+            return usage_error_exit_code;
+        }
+
+        if(!vm.count("radix-m")) {
+            std::cout << "missing argument -m [ --radix-m ]" << std::endl;
+            std::cout << desc << std::endl;
+            return usage_error_exit_code;
+        }
+        
+        std::string input_path = vm["input"].as<std::string>();
+        std::string output_path = vm["output"].as<std::string>();
+        std::size_t m = vm["radix-m"].as<std::size_t>();
+
+        if(m > tau_powers) {
+            std::cout << "m cannot be bigger than " << tau_powers << std::endl;
+            return usage_error_exit_code;
+        }
+
+        std::cout << "Reading response file: " << input_path << std::endl;
+        
+        std::vector<std::uint8_t> input_blob = marshalling_policy::read_obj(input_path);
+        accumulator_type acc = marshalling_policy::deserialize_accumulator(input_blob);
+
+        std::cout << "Computing Radix Evaluation Domain with m=" << m << std::endl;
+
+        result_type res = create_radix(acc, m);
+        
+        std::cout << "Writing to file..." << std::endl;
+        
+        std::vector<std::uint8_t> result_blob =  marshalling_policy::serialize_result(res);
+        if(!marshalling_policy::write_obj(output_path, {result_blob})) {
+            return file_exists_exit_code;
+        }
+
+        std::cout << "Radix written to " << output_path << std::endl;
     } else {
         std::cout << "invalid command: " << command << std::endl;
         std::cout << description << std::endl;
