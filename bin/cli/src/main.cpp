@@ -270,6 +270,9 @@ int main(int argc, char *argv[]) {
         
         bool is_valid = verify_contribution(before, after, pk);
         std::cout << (is_valid ? "Contribution is valid!" : "Contribution is invalid!") << std::endl;
+        if(!is_valid) {
+            return 1;
+        }
     } else {
         std::cout << "invalid command: " << command << std::endl;
         std::cout << description << std::endl;
