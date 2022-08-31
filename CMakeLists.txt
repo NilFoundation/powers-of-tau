@@ -66,6 +66,3 @@ add_subdirectories("${CMAKE_CURRENT_LIST_DIR}/libs"
 add_subdirectories("${CMAKE_CURRENT_LIST_DIR}/libs/marshalling")
                    
 add_subdirectories("${CMAKE_CURRENT_LIST_DIR}/bin")
-
-configure_file(${CMAKE_CURRENT_LIST_DIR}/docs/doxygen/${CMAKE_WORKSPACE_NAME}.doxyfile.in
-    ${CMAKE_CURRENT_BINARY_DIR}/${CMAKE_WORKSPACE_NAME}.doxyfile @ONLY)
